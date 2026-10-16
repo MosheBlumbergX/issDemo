@@ -187,6 +187,7 @@ resource "aws_instance" "app" {
     bucket     = aws_s3_bucket.app.id
     key        = aws_s3_object.app.key
     secret_arn = aws_secretsmanager_secret.kafka.arn
+    repo_url   = var.repo_url
   })
   user_data_replace_on_change = true
 

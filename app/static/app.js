@@ -476,10 +476,15 @@ function applySnapshot(s) {
   state.position = s.position || state.position;
   state.telemetry = s.telemetry || state.telemetry;
   state.distance = s.distance || state.distance;
-  if (s.console_url) {
-    const a = $("console-link");
-    a.href = s.console_url;
-    a.hidden = false;
+  if (s.repo_url) {
+    $("repo-link").href = s.repo_url;
+    $("sql-link").href = `${s.repo_url}/tree/main/terraform/sql`;
+    $("repo-link").hidden = $("sql-link").hidden = false;
+  }
+  // The console link only works for members of the deployer's Confluent org.
+  if (s.console_url && new URLSearchParams(location.search).has("presenter")) {
+    $("console-link").href = s.console_url;
+    $("console-link").hidden = false;
   }
   renderPosition();
   renderTelemetry();
@@ -531,6 +536,7 @@ function connect() {
   });
   on("iss_distance", (d) => {
     state.distance = d;
+    pulse("iss_distance");
     renderDistance();
   });
   on("metrics", renderMetrics);

@@ -74,6 +74,7 @@ class Hub:
                 "telemetry": self.latest_telemetry,
                 "distance": self.latest_distance,
                 "console_url": os.environ.get("CONSOLE_URL"),
+                "repo_url": os.environ.get("REPO_URL"),
             }
 
     def record(self, topic: str, row: dict, live: bool) -> None:

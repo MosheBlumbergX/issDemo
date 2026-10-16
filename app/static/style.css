@@ -17,6 +17,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -72,6 +73,8 @@ ol, ul { list-style: none; }
   text-decoration: none;
   backdrop-filter: blur(8px);
 }
+.controls a { display: inline-flex; align-items: center; gap: 7px; }
+.controls a svg { width: 15px; height: 15px; }
 .controls button[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); }
 .controls button:hover, .controls a:hover { border-color: var(--ink-2); }
 :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
@@ -284,7 +287,7 @@ ol, ul { list-style: none; }
   align-items: center;
   height: 100%;
   min-width: 1080px;
-  gap: 26px;
+  gap: 22px;
 }
 .flow > li { position: relative; flex: none; }
 /* connectors: the strip is a real left-to-right sequence */
@@ -292,8 +295,8 @@ ol, ul { list-style: none; }
   content: "";
   position: absolute;
   top: 50%;
-  right: -22px;
-  width: 18px;
+  right: -19px;
+  width: 15px;
   height: 1px;
   background: var(--ink-3);
 }
@@ -301,7 +304,7 @@ ol, ul { list-style: none; }
   content: "";
   position: absolute;
   top: calc(50% - 3px);
-  right: -23px;
+  right: -20px;
   border: 3.5px solid transparent;
   border-left: 5px solid var(--ink-3);
   border-right: 0;
@@ -331,8 +334,9 @@ ol, ul { list-style: none; }
 .node.small { padding: 3px 9px; min-width: 0; }
 .node.small .name { font-size: 15px; }
 .node.small .meta { font-size: 11px; }
-.sinks { display: flex; flex-direction: column; gap: 5px; }
-.sinks .node { padding: 4px 11px; }
+.sinks { display: flex; flex-direction: column; gap: 4px; }
+.sinks .node { padding: 2px 12px; flex-direction: row; align-items: baseline; gap: 10px; }
+.sinks .node .name { font-size: 16px; min-width: 84px; }
 .sinks .node .kind { display: none; }
 
 /* ---------- globe labels ---------- */

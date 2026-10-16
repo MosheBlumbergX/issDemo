@@ -1,7 +1,6 @@
-"""Connection settings from environment variables.
+"""Connection settings, from the environment or from .env.app next to this file.
 
-In AWS they are injected from Secrets Manager; locally they fall back to app/.env.app
-(written by `make config` from Terraform outputs).
+On the AWS host, the boot script writes .env.app from Secrets Manager.
 """
 import os
 from pathlib import Path
@@ -13,7 +12,7 @@ def _load_env_file() -> None:
     if "BOOTSTRAP_SERVERS" in os.environ:
         return
     if not ENV_FILE.exists():
-        raise SystemExit(f"Set BOOTSTRAP_SERVERS etc., or run `make config` to write {ENV_FILE}.")
+        raise SystemExit(f"Set BOOTSTRAP_SERVERS etc. in the environment or in {ENV_FILE}.")
     for line in ENV_FILE.read_text().splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:

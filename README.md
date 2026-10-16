@@ -52,8 +52,15 @@ clusters to run, and Terraform deploys each SQL file as a Flink statement.
 - **The pipeline strip** shows live message rates per topic and how many seconds the page
   runs behind the ISS (usually about 3).
 
-Add `?view=32,35` to the URL to open on a fixed latitude and longitude instead of following
-the station.
+URL options:
+
+- `?view=32,35` opens on a fixed latitude and longitude instead of following the station.
+- `?presenter=1` adds an "Open Flink statements" button that links to the running statements
+  in your Confluent Cloud console. It's hidden by default because it only works for members
+  of your Confluent organization.
+
+The header links to this repository and its Flink SQL. Point `repo_url` in
+`terraform.tfvars` at your fork, or set it to `""` to hide the links.
 
 ## Architecture
 

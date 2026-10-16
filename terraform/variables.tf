@@ -101,3 +101,9 @@ variable "aws_tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "repo_url" {
+  description = "Source repository linked from the dashboard. Set to \"\" to hide the links."
+  type        = string
+  default     = "https://github.com/MosheBlumbergX/issDemo"
+}
