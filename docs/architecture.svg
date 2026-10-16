@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 760" width="1400" height="760" role="img" aria-labelledby="title desc">
+  <title id="title">ISS demo data flow</title>
+  <desc id="desc">The ISS position API feeds a producer on AWS, which writes to Kafka on Confluent Cloud. Flink SQL statements enrich the stream and derive stats, distance and events into further topics. A dashboard server on AWS reads those topics and streams them through CloudFront to the browser.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7f97b2"/>
+    </marker>
+    <style>
+      .bg { fill: #061224; }
+      .group { fill: none; stroke: #1d3657; stroke-width: 1.5; }
+      .group.aws { stroke-dasharray: 6 5; }
+      .glabel { font: 600 18px 'Barlow Condensed', 'Arial Narrow', Arial, sans-serif; fill: #e8eef6; }
+      .gsub { font: 13px 'Barlow', 'Helvetica Neue', Arial, sans-serif; fill: #7f97b2; }
+      .node { fill: #0a1d37; stroke: #2a4a72; stroke-width: 1.5; }
+      .topic { fill: #0a1d37; stroke: #ffb547; stroke-width: 1.5; }
+      .stmt { fill: #0a1d37; stroke: #8fd3ff; stroke-width: 1.5; }
+      .t { font: 600 17px 'Barlow Condensed', 'Arial Narrow', Arial, sans-serif; fill: #e8eef6; text-anchor: middle; }
+      .t.topic-name { fill: #ffcf87; }
+      .t.stmt-name { fill: #a9ddff; }
+      .s { font: 12px 'Barlow', 'Helvetica Neue', Arial, sans-serif; fill: #93a9c3; text-anchor: middle; }
+      .flow { fill: none; stroke: #7f97b2; stroke-width: 1.5; }
+      .bus-label { font: 12px 'Barlow', 'Helvetica Neue', Arial, sans-serif; fill: #7f97b2; }
+      .legend { font: 13px 'Barlow', 'Helvetica Neue', Arial, sans-serif; fill: #93a9c3; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1400" height="760" rx="14"/>
+
+  <!-- groups -->
+  <rect class="group aws" x="240" y="40" width="230" height="680" rx="10"/>
+  <text class="glabel" x="258" y="70">AWS</text>
+  <text class="gsub" x="258" y="90">us-east-1</text>
+  <text class="gsub" x="258" y="711">EC2, S3, Secrets Manager</text>
+
+  <rect class="group" x="500" y="40" width="870" height="680" rx="10"/>
+  <text class="glabel" x="518" y="70">Confluent Cloud</text>
+  <text class="gsub" x="518" y="90">Kafka, Flink SQL and Schema Registry, all provisioned by Terraform</text>
+
+  <!-- external -->
+  <rect class="node" x="30" y="110" width="180" height="64" rx="6"/>
+  <text class="t" x="120" y="138">wheretheiss.at</text>
+  <text class="s" x="120" y="158">ISS position, every second</text>
+
+  <rect class="node" x="30" y="628" width="180" height="64" rx="6"/>
+  <text class="t" x="120" y="656">Your browser</text>
+  <text class="s" x="120" y="676">3D globe, live updates</text>
+
+  <!-- AWS -->
+  <rect class="node" x="260" y="110" width="190" height="64" rx="6"/>
+  <text class="t" x="355" y="138">Producer</text>
+  <text class="s" x="355" y="158">polls the API, writes Avro</text>
+
+  <rect class="node" x="260" y="528" width="190" height="64" rx="6"/>
+  <text class="t" x="355" y="556">Dashboard server</text>
+  <text class="s" x="355" y="576">reads 5 topics, streams SSE</text>
+
+  <rect class="node" x="260" y="628" width="190" height="64" rx="6"/>
+  <text class="t" x="355" y="656">CloudFront</text>
+  <text class="s" x="355" y="676">public HTTPS URL</text>
+
+  <!-- row 1 -->
+  <rect class="topic" x="530" y="110" width="170" height="64" rx="32"/>
+  <text class="t topic-name" x="615" y="138">iss_position</text>
+  <text class="s" x="615" y="158">raw fixes</text>
+
+  <rect class="stmt" x="740" y="110" width="180" height="64" rx="4"/>
+  <text class="t stmt-name" x="830" y="138">Enrich</text>
+  <text class="s" x="830" y="158">LAG, haversine, bearing</text>
+
+  <rect class="topic" x="960" y="110" width="170" height="64" rx="32"/>
+  <text class="t topic-name" x="1045" y="138">iss_telemetry</text>
+  <text class="s" x="1045" y="158">speed, heading, day/night</text>
+
+  <!-- row 2 -->
+  <rect class="stmt" x="740" y="200" width="180" height="64" rx="4"/>
+  <text class="t stmt-name" x="830" y="228">Odometer</text>
+  <text class="s" x="830" y="248">1 h window + running total</text>
+
+  <rect class="topic" x="960" y="200" width="170" height="64" rx="32"/>
+  <text class="t topic-name" x="1045" y="228">iss_distance</text>
+  <text class="s" x="1045" y="248">distance travelled</text>
+
+  <!-- row 3: statements reading iss_telemetry -->
+  <rect class="stmt" x="530" y="330" width="150" height="64" rx="4"/>
+  <text class="t stmt-name" x="605" y="358">Sliding window</text>
+  <text class="s" x="605" y="378">HOP 1 min, every 10 s</text>
+
+  <rect class="stmt" x="694" y="330" width="150" height="64" rx="4"/>
+  <text class="t stmt-name" x="769" y="358">State changes</text>
+  <text class="s" x="769" y="378">equator, sun, extremes</text>
+
+  <rect class="stmt" x="858" y="330" width="150" height="64" rx="4"/>
+  <text class="t stmt-name" x="933" y="358">City proximity</text>
+  <text class="s" x="933" y="378">UNNEST, 35 cities</text>
+
+  <rect class="stmt" x="1022" y="330" width="150" height="64" rx="4"/>
+  <text class="t stmt-name" x="1097" y="358">Full orbit</text>
+  <text class="s" x="1097" y="378">MATCH_RECOGNIZE</text>
+
+  <rect class="stmt" x="1186" y="330" width="150" height="64" rx="4"/>
+  <text class="t stmt-name" x="1261" y="358">Night pass</text>
+  <text class="s" x="1261" y="378">MATCH_RECOGNIZE</text>
+
+  <!-- row 4: output topics -->
+  <rect class="topic" x="530" y="436" width="150" height="56" rx="28"/>
+  <text class="t topic-name" x="605" y="460">iss_stats</text>
+  <text class="s" x="605" y="479">rolling averages</text>
+
+  <rect class="topic" x="694" y="436" width="642" height="56" rx="28"/>
+  <text class="t topic-name" x="1015" y="460">iss_events</text>
+  <text class="s" x="1015" y="479">flyovers, equator crossings, sunrises, orbit periods, night passes</text>
+
+  <!-- schema registry + legend -->
+  <rect class="node" x="1130" y="620" width="206" height="64" rx="6"/>
+  <text class="t" x="1233" y="648">Schema Registry</text>
+  <text class="s" x="1233" y="668">Avro schemas from Flink DDL</text>
+
+  <rect class="topic" x="530" y="640" width="40" height="20" rx="10"/>
+  <text class="legend" x="580" y="655">Kafka topic</text>
+  <rect class="stmt" x="690" y="640" width="40" height="20" rx="3"/>
+  <text class="legend" x="740" y="655">Flink SQL statement</text>
+
+  <!-- flows -->
+  <path class="flow" d="M210,142 H258" marker-end="url(#arrow)"/>
+  <path class="flow" d="M450,142 H528" marker-end="url(#arrow)"/>
+  <path class="flow" d="M700,142 H738" marker-end="url(#arrow)"/>
+  <path class="flow" d="M920,142 H958" marker-end="url(#arrow)"/>
+  <path class="flow" d="M615,174 V232 H738" marker-end="url(#arrow)"/>
+  <path class="flow" d="M920,232 H958" marker-end="url(#arrow)"/>
+
+  <path class="flow" d="M1130,142 H1261 V300"/>
+  <path class="flow" d="M605,300 H1261"/>
+  <path class="flow" d="M605,300 V328" marker-end="url(#arrow)"/>
+  <path class="flow" d="M769,300 V328" marker-end="url(#arrow)"/>
+  <path class="flow" d="M933,300 V328" marker-end="url(#arrow)"/>
+  <path class="flow" d="M1097,300 V328" marker-end="url(#arrow)"/>
+  <path class="flow" d="M1261,300 V328" marker-end="url(#arrow)"/>
+
+  <path class="flow" d="M605,394 V434" marker-end="url(#arrow)"/>
+  <path class="flow" d="M769,394 V434" marker-end="url(#arrow)"/>
+  <path class="flow" d="M933,394 V434" marker-end="url(#arrow)"/>
+  <path class="flow" d="M1097,394 V434" marker-end="url(#arrow)"/>
+  <path class="flow" d="M1261,394 V434" marker-end="url(#arrow)"/>
+
+  <path class="flow" d="M1015,492 V560"/>
+  <path class="flow" d="M605,492 V560"/>
+  <path class="flow" d="M1015,560 H452" marker-end="url(#arrow)"/>
+  <text class="bus-label" x="626" y="582">also reads iss_position, iss_telemetry and iss_distance</text>
+
+  <path class="flow" d="M355,592 V626" marker-end="url(#arrow)"/>
+  <path class="flow" d="M260,660 H212" marker-end="url(#arrow)"/>
+</svg>

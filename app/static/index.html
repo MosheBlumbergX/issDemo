@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ISS live: Confluent Cloud + Apache Flink</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5' fill='%23ffb547'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div id="globe" aria-label="3D globe showing the live position of the International Space Station"></div>
+
+  <header class="masthead">
+    <h1>International Space Station</h1>
+    <p>Streamed through Confluent Cloud and Apache Flink</p>
+  </header>
+
+  <div class="controls">
+    <span class="link-state" id="link-state" data-state="connecting">Connecting</span>
+    <button type="button" id="follow" aria-pressed="true">Following the ISS</button>
+    <a id="console-link" href="#" target="_blank" rel="noopener" hidden>Open Flink statements</a>
+  </div>
+
+  <aside class="panel readouts" aria-label="Telemetry">
+    <section class="velocity">
+      <h2>Orbital velocity</h2>
+      <p class="hero-number"><span id="v-kmh">-</span><span class="unit">km/h</span></p>
+      <div class="velocity-alt">
+        <p><span id="v-mph">-</span> mph</p>
+        <p><span id="v-kms">-</span> km per second</p>
+      </div>
+    </section>
+
+    <dl class="grid">
+      <div><dt>Altitude</dt><dd><span id="alt">-</span> km</dd></div>
+      <div><dt>Heading</dt><dd><span class="compass" aria-hidden="true"><i id="compass-needle"></i></span><span id="heading">-</span></dd></div>
+      <div><dt>Latitude</dt><dd id="lat">-</dd></div>
+      <div><dt>Longitude</dt><dd id="lon">-</dd></div>
+      <div class="wide"><dt>Ground-track speed, computed by Flink</dt><dd><span id="ground">-</span> km/h</dd></div>
+      <div><dt>Distance, last hour</dt><dd><span id="dist-1h">-</span> km</dd></div>
+      <div><dt id="dist-total-label">Distance tracked</dt><dd><span id="dist-total">-</span> km</dd></div>
+      <div class="wide situation"><dt>Status</dt><dd id="situation">Waiting for the first fix</dd></div>
+    </dl>
+
+    <figure class="spark" id="spark-alt">
+      <figcaption>Altitude over the last orbit, km</figcaption>
+      <div class="spark-plot"></div>
+    </figure>
+    <figure class="spark" id="spark-speed">
+      <figcaption>Speed, 1-minute sliding average from Flink, km/h</figcaption>
+      <div class="spark-plot"></div>
+    </figure>
+  </aside>
+
+  <aside class="panel log" aria-label="Flight log">
+    <h2>Flight log</h2>
+    <p class="log-sub">Events detected by Flink as they happen</p>
+    <ol id="events" aria-live="polite"></ol>
+    <p class="log-empty" id="events-empty">Flink is watching for equator crossings, orbital sunrises and sunsets, and passes over major cities. The first event usually appears within 20 minutes.</p>
+  </aside>
+
+  <div class="flyover-banner" id="banner" role="status" hidden></div>
+
+  <section class="panel pipeline" aria-label="Streaming pipeline">
+    <ol class="flow">
+      <li class="node source">
+        <span class="kind">Source</span>
+        <span class="name">wheretheiss.at</span>
+        <span class="meta">polled every second</span>
+      </li>
+      <li class="node topic" data-topic="iss_position">
+        <span class="kind">Kafka topic</span>
+        <span class="name">iss_position</span>
+        <span class="meta"><b class="rate">0.0</b> msg/s</span>
+      </li>
+      <li class="node stmt">
+        <span class="kind">Flink SQL</span>
+        <span class="name">Enrich</span>
+        <span class="meta">LAG, haversine, bearing</span>
+      </li>
+      <li class="node topic" data-topic="iss_telemetry">
+        <span class="kind">Kafka topic</span>
+        <span class="name">iss_telemetry</span>
+        <span class="meta"><b class="rate">0.0</b> msg/s</span>
+      </li>
+      <li class="fan">
+        <ul>
+          <li class="node stmt small"><span class="name">Sliding window</span><span class="meta">HOP 1 min / 10 s</span></li>
+          <li class="node stmt small"><span class="name">State changes</span><span class="meta">equator, day and night</span></li>
+          <li class="node stmt small"><span class="name">City proximity</span><span class="meta">UNNEST over 35 cities</span></li>
+          <li class="node stmt small"><span class="name">Full orbit</span><span class="meta">MATCH_RECOGNIZE</span></li>
+          <li class="node stmt small"><span class="name">Night pass</span><span class="meta">MATCH_RECOGNIZE</span></li>
+        </ul>
+      </li>
+      <li class="sinks">
+        <div class="node topic" data-topic="iss_stats">
+          <span class="kind">Kafka topic</span>
+          <span class="name">iss_stats</span>
+          <span class="meta"><b class="total">0</b> windows</span>
+        </div>
+        <div class="node topic" data-topic="iss_events">
+          <span class="kind">Kafka topic</span>
+          <span class="name">iss_events</span>
+          <span class="meta"><b class="total">0</b> events</span>
+        </div>
+      </li>
+      <li class="node sink">
+        <span class="kind">This page</span>
+        <span class="name"><b id="lag">-</b> behind orbit</span>
+        <span class="meta">via server-sent events</span>
+      </li>
+    </ol>
+  </section>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

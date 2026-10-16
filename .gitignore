@@ -1,0 +1,13 @@
+# Credentials
+.env
+!.env.example
+terraform/terraform.tfvars
+
+# Terraform state holds every generated API key in plain text
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.build/
+
+__pycache__/
+.DS_Store

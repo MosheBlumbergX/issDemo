@@ -1,0 +1,57 @@
+#!/bin/bash
+# Boot script: install the app from S3, pull credentials, run producer + dashboard.
+set -euxo pipefail
+
+dnf install -y python3.11 python3.11-pip unzip jq
+
+useradd --system --home /opt/iss --shell /sbin/nologin iss || true
+mkdir -p /opt/iss
+aws s3 cp "s3://${bucket}/${key}" /tmp/app.zip --region ${region}
+unzip -o /tmp/app.zip -d /opt/iss
+
+python3.11 -m venv /opt/iss/.venv
+/opt/iss/.venv/bin/pip install --upgrade pip
+/opt/iss/.venv/bin/pip install -r /opt/iss/requirements.txt
+
+# Credentials -> app/.env.app format, readable only by the service user.
+aws secretsmanager get-secret-value --secret-id "${secret_arn}" --region ${region} \
+  --query SecretString --output text | jq -r 'to_entries[] | "\(.key)=\(.value)"' > /opt/iss/.env.app
+chown -R iss:iss /opt/iss
+chmod 600 /opt/iss/.env.app
+
+cat > /etc/systemd/system/iss-producer.service <<'UNIT'
+[Unit]
+Description=ISS position producer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=iss
+WorkingDirectory=/opt/iss
+ExecStart=/opt/iss/.venv/bin/python -u producer.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/iss-dashboard.service <<'UNIT'
+[Unit]
+Description=ISS dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=iss
+WorkingDirectory=/opt/iss
+ExecStart=/opt/iss/.venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now iss-producer iss-dashboard

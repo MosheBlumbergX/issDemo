@@ -1,0 +1,41 @@
+-- Fan every fix out across a reference list of cities (UNNEST) and compute the
+-- distance from each city at the current and two previous fixes. When the
+-- middle one is the smallest, that was the closest approach. Fully stateless.
+-- The event is located at the city; distance_km is how close the station came.
+INSERT INTO `iss_events`
+SELECT
+  `event_time`,
+  'CITY_FLYOVER' AS `event_type`,
+  CONCAT('Flyover: ', `city`, ', ', `country`) AS `title`,
+  CONCAT('Closest approach ', CAST(CAST(ROUND(`d1`, 0) AS INT) AS STRING), ' km from ', `city`) AS `detail`,
+  `clat` AS `latitude`,
+  `clon` AS `longitude`,
+  `d1` AS `distance_km`,
+  CAST(NULL AS DOUBLE) AS `duration_min`
+FROM (
+  SELECT
+    t.`event_time`, c.`city`, c.`country`, c.`clat`, c.`clon`,
+    2 * 6371.0 * ASIN(SQRT(
+        POWER(SIN(RADIANS(t.`latitude` - c.`clat`) / 2), 2)
+      + COS(RADIANS(c.`clat`)) * COS(RADIANS(t.`latitude`))
+        * POWER(SIN(RADIANS(t.`longitude` - c.`clon`) / 2), 2)
+    )) AS `d0`,
+    2 * 6371.0 * ASIN(SQRT(
+        POWER(SIN(RADIANS(t.`prev_latitude` - c.`clat`) / 2), 2)
+      + COS(RADIANS(c.`clat`)) * COS(RADIANS(t.`prev_latitude`))
+        * POWER(SIN(RADIANS(t.`prev_longitude` - c.`clon`) / 2), 2)
+    )) AS `d1`,
+    2 * 6371.0 * ASIN(SQRT(
+        POWER(SIN(RADIANS(t.`prev2_latitude` - c.`clat`) / 2), 2)
+      + COS(RADIANS(c.`clat`)) * COS(RADIANS(t.`prev2_latitude`))
+        * POWER(SIN(RADIANS(t.`prev2_longitude` - c.`clon`) / 2), 2)
+    )) AS `d2`
+  FROM `iss_telemetry` AS t
+  CROSS JOIN UNNEST(ARRAY[
+    ${cities}
+  ]) AS c (`city`, `country`, `clat`, `clon`)
+  WHERE t.`prev2_latitude` IS NOT NULL
+)
+WHERE `d1` < ${radius_km}
+  AND `d1` < `d2`
+  AND `d1` <= `d0`;
