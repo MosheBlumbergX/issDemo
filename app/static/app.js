@@ -23,7 +23,6 @@ const state = {
   lastTrailDraw: 0,
   satellitesEnabled: false,
   satellites: [],    // tracked catalog: { id, name, satrec }
-  catalogPoints: [], // their positions, propagated in the browser
   neighbours: null,  // Flink's iss_proximity, one second's set: { t, sats }
   forecast: null,
 };
@@ -114,13 +113,17 @@ const globe = new Globe(globeEl, { rendererConfig: { antialias: true, alpha: fal
   .labelSize((d) => d.size ?? 0.55).labelDotRadius((d) => d.dot ?? 0.35)
   .labelColor((d) => d.color)
   .labelResolution(2)
-  .labelAltitude((d) => d.alt ?? 0.004)
-  // satellites: the whole tracked catalog (faint) and Flink's nearby set (bright)
-  .particlesList("pts")
-  .particleLat("lat").particleLng("lng").particleAltitude("alt")
-  .particlesSize("size")
-  .particlesSizeAttenuation(false)
-  .particlesColor("color");
+  .labelAltitude((d) => d.alt ?? 0.004);
+
+// globe.gl matches data by object identity: a new object means a new mesh and material,
+// and once the old material is gone, a shader recompile that stalls rendering. So every
+// layer below gets the same object per thing, updated in place.
+function reuse(cache, entries) {
+  const objects = entries.map(([key, props]) => Object.assign(cache.get(key) ?? {}, props));
+  cache.clear();
+  entries.forEach(([key], i) => cache.set(key, objects[i]));
+  return objects;
+}
 
 // Hide the marker while the station is on the far side of the planet. globe.gl only
 // re-checks occlusion when the camera moves, so test every frame ourselves.
@@ -159,7 +162,7 @@ function trailSegments() {
     const breakHere = !current || p.sunlit !== current.sunlit || (prev && p.t - prev.t > 30000);
     if (breakHere) {
       if (current && prev && p.t - prev.t <= 30000) current.points.push(toPoint(p)); // join seamlessly
-      current = { sunlit: p.sunlit, points: [] };
+      current = { start: p.t, sunlit: p.sunlit, points: [] };
       segments.push(current);
     }
     current.points.push(toPoint(p));
@@ -167,12 +170,12 @@ function trailSegments() {
   }
   return segments
     .filter((s) => s.points.length > 1)
-    .map((s) => ({
+    .map((s) => [`trail|${s.start}`, {
       kind: "trail",
-      points: s.points,
+      pts: s.points,
       color: s.sunlit ? AMBER : "rgba(147,169,195,0.75)",
       stroke: 1.6,
-    }));
+    }]);
 }
 
 const toPoint = (p) => [p.latitude, p.longitude, (p.altitude_km ?? 420) / EARTH_RADIUS_KM];
@@ -189,12 +192,13 @@ function forecastPath() {
     const geo = satellite.eciToGeodetic(pv.position, satellite.gstime(date));
     points.push([satellite.degreesLat(geo.latitude), satellite.degreesLong(geo.longitude), geo.height / EARTH_RADIUS_KM]);
   }
-  return [{ kind: "forecast", points, color: ICE, stroke: 1.1 }];
+  return [["forecast", { kind: "forecast", pts: points, color: ICE, stroke: 1.1 }]];
 }
 
+const pathObjects = new Map();
 function drawPaths() {
   state.lastTrailDraw = Date.now();
-  globe.pathsData([...trailSegments(), ...forecastPath()].map((d) => ({ ...d, pts: d.points })));
+  globe.pathsData(reuse(pathObjects, [...trailSegments(), ...forecastPath()]));
 }
 globe.pathPoints("pts");
 
@@ -210,43 +214,71 @@ async function loadTle() {
 // Rings + labels
 // ---------------------------------------------------------------------------
 let flyoverRings = [];
+const footprintRing = { kind: "footprint" };
 
 function drawRings() {
   const p = state.position;
-  const footprint = p
-    ? [{ kind: "footprint", lat: p.latitude, lng: p.longitude, radius: (p.footprint_km || 4500) / 2 / 111.2 }]
-    : [];
+  if (p) Object.assign(footprintRing, { lat: p.latitude, lng: p.longitude, radius: (p.footprint_km || 4500) / 2 / 111.2 });
   const now = Date.now();
   flyoverRings = flyoverRings.filter((r) => now - r.at < 10 * 60 * 1000);
-  globe.ringsData([...footprint, ...flyoverRings]);
+  globe.ringsData([...(p ? [footprintRing] : []), ...flyoverRings]);
 }
 
+// Satellite labels carry only the name: changing text rebuilds the label's geometry.
+const labelObjects = new Map();
 function drawLabels() {
   const recent = state.events.filter((e) => e.event_type === "CITY_FLYOVER").slice(-8);
   const nearest = currentNeighbours().slice(0, 3);
-  globe.labelsData([
-    ...recent.map((e) => ({
+  globe.labelsData(reuse(labelObjects, [
+    ...recent.map((e) => [eventKey(e), {
       lat: e.latitude,
       lng: e.longitude,
       text: e.title.replace("Flyover: ", "").split(",")[0],
       color: "rgba(143,211,255,0.9)",
-    })),
-    ...nearest.map((s) => ({
+    }]),
+    ...nearest.map((s) => [`sat|${s.norad_id}`, {
       lat: s.latitude,
       lng: s.longitude,
       alt: s.altitude_km / EARTH_RADIUS_KM,
-      text: `${s.name} ${fmt(s.distance_km)} km`,
+      text: s.name,
       color: "rgba(232,238,246,0.85)",
       size: 0.28,
       dot: 0.15,
-    })),
-  ]);
+    }]),
+  ]));
 }
 
 // ---------------------------------------------------------------------------
 // Satellites: the catalog is propagated here for the picture; which ones are
-// near the ISS, and how near, comes from Flink (iss_proximity).
+// near the ISS, and how near, comes from Flink (iss_proximity). Both sets are
+// plain THREE.Points with fixed buffers, rewritten in place on each update.
 // ---------------------------------------------------------------------------
+function pointLayer(capacity, color, size) {
+  const geometry = new THREE.BufferGeometry();
+  const position = new THREE.BufferAttribute(new Float32Array(capacity * 3), 3).setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute("position", position);
+  geometry.setDrawRange(0, 0);
+  const points = new THREE.Points(geometry, new THREE.PointsMaterial({ color, size, sizeAttenuation: false }));
+  points.frustumCulled = false;
+  globe.scene().add(points);
+  return points;
+}
+const catalogLayer = pointLayer(20000, "#5d7898", 1.5);
+const nearLayer = pointLayer(2000, ICE, 4);
+
+function setPoints(layer, list) {
+  const position = layer.geometry.attributes.position;
+  const n = Math.min(list.length, position.count);
+  for (let i = 0; i < n; i++) {
+    const { x, y, z } = globe.getCoords(list[i].lat, list[i].lng, list[i].alt);
+    position.array[i * 3] = x;
+    position.array[i * 3 + 1] = y;
+    position.array[i * 3 + 2] = z;
+  }
+  position.needsUpdate = true;
+  layer.geometry.setDrawRange(0, n);
+}
+
 async function loadSatellites() {
   try {
     const resp = await fetch("/api/satellites");
@@ -270,8 +302,7 @@ function propagateCatalog() {
     const geo = satellite.eciToGeodetic(pv.position, gmst);
     points.push({ lat: satellite.degreesLat(geo.latitude), lng: satellite.degreesLong(geo.longitude), alt: geo.height / EARTH_RADIUS_KM });
   }
-  state.catalogPoints = points;
-  drawSatellites();
+  setPoints(catalogLayer, points);
 }
 
 // Flink's latest set, nearest first; empty once it is more than a few seconds behind the ISS.
@@ -281,16 +312,8 @@ function currentNeighbours() {
   return n.sats.slice().sort((a, b) => a.distance_km - b.distance_km);
 }
 
-function drawSatellites() {
-  const near = currentNeighbours().map((s) => ({ lat: s.latitude, lng: s.longitude, alt: s.altitude_km / EARTH_RADIUS_KM }));
-  globe.particlesData([
-    { pts: state.catalogPoints, color: "#5d7898", size: 1.5 },
-    { pts: near, color: ICE, size: 4 },
-  ]);
-}
-
 function renderNeighbours() {
-  drawSatellites();
+  setPoints(nearLayer, currentNeighbours().map((s) => ({ lat: s.latitude, lng: s.longitude, alt: s.altitude_km / EARTH_RADIUS_KM })));
   drawLabels();
   if (!state.neighbours) return;
   const sats = currentNeighbours();
@@ -309,7 +332,7 @@ function countdown(ms) {
 function renderForecast() {
   const f = state.forecast;
   if (!f) return;
-  $("forecast-sub").textContent = `Predicted from orbital elements: the next ${f.hours} hours, under ${fmt(f.radius_km)} km`;
+  $("forecast-sub").textContent = `Coming up: passes under ${fmt(f.radius_km)} km in the next ${f.hours} hours, predicted from orbital elements`;
   const now = Date.now();
   const upcoming = f.approaches.filter((a) => a.t > now - 30000).slice(0, 3);
   $("forecast").replaceChildren(...upcoming.map((a) => {
@@ -325,7 +348,7 @@ function renderForecast() {
     const above = a.altitude_km >= a.iss_altitude_km ? "above" : "below";
     btn.querySelector(".title").textContent = a.name;
     btn.querySelector(".detail").textContent =
-      `${fmt(a.distance_km)} km from the ISS, ${fmt(Math.abs(a.altitude_km - a.iss_altitude_km))} km ${above}, at ${clock(a.t)}`;
+      `Will pass ${fmt(a.distance_km)} km away, ${fmt(Math.abs(a.altitude_km - a.iss_altitude_km))} km ${above}, at ${clock(a.t)}`;
     btn.addEventListener("click", () => {
       setFollow(false);
       globe.pointOfView({ lat: a.latitude, lng: a.longitude, altitude: 1.6 }, 1200);
@@ -631,7 +654,7 @@ function applySnapshot(s) {
     state.satellitesEnabled = true;
     document.querySelectorAll(".sat-only").forEach((el) => (el.hidden = false));
     $("prox-radius").textContent = fmt(s.proximity_radius_km);
-    $("forecast-sub").textContent = `Predicted from orbital elements, under ${fmt(s.conjunction_radius_km)} km`;
+    $("forecast-sub").textContent = `Coming up: passes under ${fmt(s.conjunction_radius_km)} km, predicted from orbital elements`;
     loadSatellites();
     setInterval(loadSatellites, 30 * 60 * 1000);
   }

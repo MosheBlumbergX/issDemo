@@ -1,6 +1,6 @@
 # The ISS, live, through Kafka and Flink
 
-![The dashboard: a 3D globe with the ISS over the Atlantic, its orbit trail and predicted path, live telemetry on the left, and a flight log of Flink-detected events on the right](docs/dashboard.jpg)
+![The dashboard: a 3D globe with the ISS over the southern Indian Ocean inside a shell of faint satellite dots, its orbit trail and predicted path. Live telemetry is on the left; on the right, the nearest satellite right now, the next predicted close approaches and a flight log of Flink-detected events](docs/dashboard.jpg)
 
 The International Space Station circles the Earth every 93 minutes at about 27,600 km/h.
 This project follows it in real time: once a second, a position fix goes into Kafka on
@@ -61,10 +61,12 @@ clusters to run, and Terraform deploys each SQL file as a Flink statement.
   heading, ground-track speed and distance travelled.
 - **The satellites** that share the ISS's altitude are faint dots around the globe. The
   ones Flink finds within 500 km of the station are highlighted, and the nearest three are
-  named with their distance. The left panel shows the nearest one and how many are in range.
-- **Next close approaches** lists the next three passes under 40 km, predicted from orbital
-  elements for the next six hours. Flink only sees the present, so this forecast is computed
-  by the dashboard server.
+  named.
+- **Satellites nearby** shows, from Flink, the nearest satellite right now and how many are
+  within 500 km. Below it come the next three passes under 40 km, predicted from orbital
+  elements for the next six hours. The two answer different questions: the nearest object is
+  usually hundreds of km away, and a 22 km pass lasts only seconds. Flink only sees the
+  present, so the forecast is computed by the dashboard server.
 - **The flight log** lists Flink's events as they're detected. Click one to fly the globe
   there; city flyovers and close approaches also pulse on the map.
 - **The pipeline strip** shows live message rates per topic and how many seconds the page
@@ -89,7 +91,9 @@ The header links to this repository and its Flink SQL. Point `repo_url` in
 - **Satellite producer** (same host) downloads the active-satellite catalog from
   [CelesTrak](https://celestrak.org/) every two hours and keeps the satellites whose orbits
   come within 45 km of the ISS's altitude range. Every second it computes where each one is
-  (SGP4) and writes them to `sat_positions`, stamped with the whole second.
+  (SGP4) and writes them to `sat_positions`, stamped with the whole second. CelesTrak
+  refuses a repeat download from the same address within one update, so the host keeps a
+  copy of the catalog in S3, and a replaced instance starts from that.
 - **Flink SQL** owns the data model. `CREATE TABLE` statements create every topic and
   register its Avro schema; the producer fetches the schema from Schema Registry instead
   of defining its own.

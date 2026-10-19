@@ -154,8 +154,6 @@ ol, ul { list-style: none; }
   gap: 8px;
 }
 .grid .situation dd { font-family: var(--body); font-size: 15px; line-height: 1.4; }
-.grid .nearest { justify-content: space-between; }
-.grid .near-dist { color: var(--ink-2); }
 
 .compass {
   width: 22px; height: 22px;
@@ -253,6 +251,11 @@ ol, ul { list-style: none; }
 .log-empty { color: var(--ink-2); font-size: 14px; padding: 18px 22px; max-width: 34ch; }
 
 .forecast { margin-bottom: 18px; border-bottom: 1px solid var(--rule); }
+.nearest { display: flex; justify-content: space-between; gap: 16px; padding: 8px 22px 12px; }
+.nearest dt { font-size: 13px; color: var(--ink-2); }
+.nearest dd { font-family: var(--display); font-size: 20px; font-weight: 500; }
+.nearest dd b { color: var(--ice); font-weight: 500; white-space: nowrap; }
+.nearest div:last-child { text-align: right; flex: none; }
 .forecast ol { flex: none; overflow: visible; }
 .forecast li:last-child button { border-bottom: 0; }
 .forecast .glyph { border-style: dashed; }
@@ -296,8 +299,8 @@ ol, ul { list-style: none; }
   display: flex;
   align-items: center;
   height: 100%;
-  min-width: 1260px;
-  gap: 22px;
+  min-width: 1200px;
+  gap: 14px;
 }
 .flow > li { position: relative; flex: none; }
 /* connectors: the strip is a real left-to-right sequence */
@@ -305,8 +308,8 @@ ol, ul { list-style: none; }
   content: "";
   position: absolute;
   top: 50%;
-  right: -19px;
-  width: 15px;
+  right: -12px;
+  width: 9px;
   height: 1px;
   background: var(--ink-3);
 }
@@ -314,7 +317,7 @@ ol, ul { list-style: none; }
   content: "";
   position: absolute;
   top: calc(50% - 3px);
-  right: -20px;
+  right: -13px;
   border: 3.5px solid transparent;
   border-left: 5px solid var(--ink-3);
   border-right: 0;
@@ -326,7 +329,7 @@ ol, ul { list-style: none; }
   border: 1px solid var(--rule);
   border-radius: 4px;
   padding: 7px 11px;
-  min-width: 118px;
+  min-width: 108px;
   background: rgba(6, 18, 36, 0.6);
   transition: border-color 0.6s ease, box-shadow 0.6s ease;
 }
@@ -348,7 +351,7 @@ ol, ul { list-style: none; }
 .stack .node { padding: 4px 11px; }
 .stack .node .kind { display: none; }
 .sinks .node { padding: 2px 12px; flex-direction: row; align-items: baseline; gap: 10px; }
-.sinks .node .name { font-size: 16px; min-width: 84px; }
+.sinks .node .name { font-size: 16px; min-width: 76px; }
 .sinks .node .kind { display: none; }
 
 /* ---------- globe labels ---------- */

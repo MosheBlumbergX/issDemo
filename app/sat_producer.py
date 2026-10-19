@@ -20,7 +20,7 @@ import config
 import orbits
 
 RELOAD_SECONDS = 600  # orbits.load_catalog() only downloads once the cache is 2 h old
-RETRY_SECONDS = 120   # without a catalog, wait before asking CelesTrak again
+RETRY_SECONDS = 120   # without a catalog, check again (orbits limits actual CelesTrak requests)
 
 running = True
 

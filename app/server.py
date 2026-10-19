@@ -228,22 +228,24 @@ async def metrics_loop() -> None:
 async def forecast_loop() -> None:
     """Predicts the next close approaches. Flink sees only the present, so this runs here."""
     loop = asyncio.get_running_loop()
-    # A separate process keeps the CPU-heavy propagation off the event loop; spawn, not
-    # fork, because the Kafka consumer thread must not be copied into the child.
-    with ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn")) as pool:
-        while True:
-            try:
+    while True:
+        # A separate process keeps the CPU-heavy propagation off the event loop; spawn, not
+        # fork, because the Kafka consumer thread must not be copied into the child. A
+        # fresh pool each time, so one crashed worker can't stop every later forecast.
+        try:
+            with ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn")) as pool:
                 approaches = await loop.run_in_executor(pool, orbits.forecast, FORECAST_HOURS, CONJUNCTION_RADIUS_KM)
-                hub.forecast = {
-                    "computed_at": int(time.time() * 1000),
-                    "hours": FORECAST_HOURS,
-                    "radius_km": CONJUNCTION_RADIUS_KM,
-                    "approaches": approaches,
-                }
-                hub.publish("forecast", hub.forecast)
-            except Exception as exc:
-                print(f"forecast failed: {exc}")
+            hub.forecast = {
+                "computed_at": int(time.time() * 1000),
+                "hours": FORECAST_HOURS,
+                "radius_km": CONJUNCTION_RADIUS_KM,
+                "approaches": approaches,
+            }
+            hub.publish("forecast", hub.forecast)
             await asyncio.sleep(FORECAST_EVERY_SECONDS)
+        except Exception as exc:
+            print(f"forecast failed: {exc}")
+            await asyncio.sleep(120)  # the catalog may simply not be there yet
 
 
 @asynccontextmanager
