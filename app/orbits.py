@@ -9,6 +9,7 @@ import fcntl
 import json
 import math
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -22,6 +23,13 @@ from sgp4.api import Satrec, SatrecArray
 CATALOG_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json"
 CACHE_FILE = Path(__file__).with_name(".cache") / "celestrak-active.json"
 REFRESH_SECONDS = 2 * 3600
+# CelesTrak answers 403 to a second download of the same data from one address, and
+# blocks addresses that keep getting errors. After a failure, neither process asks again
+# for this long. On AWS, each download is copied to S3 and restored on boot, so a new
+# instance on the same Elastic IP doesn't need one.
+RETRY_SECONDS = 15 * 60
+FAILURE_MARKER = CACHE_FILE.with_suffix(".failed")
+BACKUP_URI = os.environ.get("CATALOG_BACKUP_URI")
 ISS_NORAD_ID = 25544
 
 MU_KM3_S2 = 398600.4418
@@ -45,20 +53,29 @@ def load_catalog() -> list[dict]:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if CACHE_FILE.exists() and time.time() - CACHE_FILE.stat().st_mtime < REFRESH_SECONDS:
             return json.loads(CACHE_FILE.read_text())
+        failed_recently = FAILURE_MARKER.exists() and time.time() - FAILURE_MARKER.stat().st_mtime < RETRY_SECONDS
         try:
+            if failed_recently:
+                raise ValueError("last download failed, waiting before asking CelesTrak again")
             resp = httpx.get(CATALOG_URL, timeout=30, headers={"User-Agent": "confluent-iss-demo"})
             resp.raise_for_status()
             catalog = resp.json()
             if not isinstance(catalog, list) or not catalog:
                 raise ValueError("empty catalog")
         except (httpx.HTTPError, ValueError) as exc:
+            if not failed_recently:
+                FAILURE_MARKER.touch()
             if CACHE_FILE.exists():  # keep going on the old elements; they stay usable for days
                 print(f"catalog refresh failed, using cached copy: {exc}", file=sys.stderr)
                 return json.loads(CACHE_FILE.read_text())
-            raise
+            # A plain error: httpx's can't be pickled back from the forecast worker process.
+            raise RuntimeError(f"no satellite catalog yet: {exc}") from None
         tmp = CACHE_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(catalog))
         tmp.replace(CACHE_FILE)
+        FAILURE_MARKER.unlink(missing_ok=True)
+        if BACKUP_URI:
+            subprocess.Popen(["aws", "s3", "cp", "--quiet", str(CACHE_FILE), BACKUP_URI])
         return catalog
 
 

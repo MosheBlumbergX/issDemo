@@ -118,6 +118,12 @@ resource "aws_iam_role_policy" "app" {
         Resource = "${aws_s3_bucket.app.arn}/*"
       },
       {
+        # Copy of the CelesTrak catalog, so a replaced instance doesn't download it again.
+        Effect   = "Allow"
+        Action   = "s3:PutObject"
+        Resource = "${aws_s3_bucket.app.arn}/cache/*"
+      },
+      {
         Effect   = "Allow"
         Action   = "secretsmanager:GetSecretValue"
         Resource = aws_secretsmanager_secret.kafka.arn
@@ -189,6 +195,7 @@ resource "aws_instance" "app" {
     secret_arn = aws_secretsmanager_secret.kafka.arn
     repo_url   = var.repo_url
 
+    catalog_backup_uri    = "s3://${aws_s3_bucket.app.id}/cache/celestrak-active.json"
     satellites_enabled    = var.satellites_enabled
     band_margin_km        = var.conjunction_radius_km + 5
     proximity_radius_km   = var.proximity_radius_km

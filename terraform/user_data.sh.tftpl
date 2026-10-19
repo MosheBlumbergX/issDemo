@@ -16,6 +16,14 @@ python3.11 -m venv /opt/iss/.venv
 # Credentials -> app/.env.app format, readable only by the service user.
 aws secretsmanager get-secret-value --secret-id "${secret_arn}" --region ${region} \
   --query SecretString --output text | jq -r 'to_entries[] | "\(.key)=\(.value)"' > /opt/iss/.env.app
+# CelesTrak refuses a second download of the same data from one address, and a new
+# instance keeps the Elastic IP; start from the last copy, with its original age.
+mkdir -p /opt/iss/.cache
+if aws s3 cp "${catalog_backup_uri}" /opt/iss/.cache/celestrak-active.json --region ${region}; then
+  touch -d "$(aws s3api head-object --bucket ${bucket} --key cache/celestrak-active.json --region ${region} --query LastModified --output text)" \
+    /opt/iss/.cache/celestrak-active.json
+fi
+
 chown -R iss:iss /opt/iss
 chmod 600 /opt/iss/.env.app
 
@@ -46,6 +54,7 @@ Wants=network-online.target
 User=iss
 WorkingDirectory=/opt/iss
 Environment=SAT_BAND_MARGIN_KM=${band_margin_km}
+Environment=CATALOG_BACKUP_URI=${catalog_backup_uri}
 ExecStart=/opt/iss/.venv/bin/python -u sat_producer.py
 Restart=always
 RestartSec=5
@@ -66,6 +75,7 @@ WorkingDirectory=/opt/iss
 Environment=REPO_URL=${repo_url}
 Environment=SATELLITES_ENABLED=${satellites_enabled}
 Environment=SAT_BAND_MARGIN_KM=${band_margin_km}
+Environment=CATALOG_BACKUP_URI=${catalog_backup_uri}
 Environment=PROXIMITY_RADIUS_KM=${proximity_radius_km}
 Environment=CONJUNCTION_RADIUS_KM=${conjunction_radius_km}
 Environment=CITY_COUNT=${city_count}

@@ -47,8 +47,6 @@
       <div class="wide"><dt>Ground-track speed, computed by Flink</dt><dd><span id="ground">-</span> km/h</dd></div>
       <div><dt>Distance, last hour</dt><dd><span id="dist-1h">-</span> km</dd></div>
       <div><dt id="dist-total-label">Distance tracked</dt><dd><span id="dist-total">-</span> km</dd></div>
-      <div class="wide sat-only" hidden><dt>Nearest satellite, from a Flink window join</dt><dd class="nearest"><span id="near-name">-</span><span class="near-dist"><span id="near-dist">-</span> km</span></dd></div>
-      <div class="wide sat-only" hidden><dt>Satellites within <span id="prox-radius">500</span> km of the ISS</dt><dd id="near-count">-</dd></div>
       <div class="wide situation"><dt>Status</dt><dd id="situation">Waiting for the first fix</dd></div>
     </dl>
 
@@ -63,9 +61,13 @@
   </aside>
 
   <aside class="panel log" aria-label="Flight log">
-    <section class="forecast sat-only" aria-label="Upcoming close approaches" hidden>
-      <h2>Next close approaches</h2>
-      <p class="log-sub" id="forecast-sub">Predicted from orbital elements, under 40 km</p>
+    <section class="forecast sat-only" aria-label="Satellites near the ISS" hidden>
+      <h2>Satellites nearby</h2>
+      <dl class="nearest">
+        <div><dt>Nearest right now, from Flink</dt><dd><span id="near-name">-</span> <b><span id="near-dist">-</span> km</b></dd></div>
+        <div><dt>Within <span id="prox-radius">500</span> km now</dt><dd id="near-count">-</dd></div>
+      </dl>
+      <p class="log-sub" id="forecast-sub">Coming up: the closest passes, predicted from orbital elements</p>
       <ol id="forecast"></ol>
       <p class="log-empty" id="forecast-empty">Computing the next six hours of orbits</p>
     </section>
