@@ -1,0 +1,28 @@
+-- Window join: every satellite position meets the ISS fix from the same second
+-- (1-second tumbling windows on both streams), and the straight-line distance
+-- between them is computed in 3D from latitude, longitude and altitude. Only
+-- satellites within ${radius_km} km of the station are kept.
+INSERT INTO `iss_proximity`
+SELECT `event_time`, `norad_id`, `name`, `latitude`, `longitude`, `altitude_km`, `iss_altitude_km`, `distance_km`
+FROM (
+  SELECT
+    i.`event_time`,
+    s.`norad_id`,
+    s.`name`,
+    s.`latitude`,
+    s.`longitude`,
+    s.`altitude_km`,
+    i.`altitude_km` AS `iss_altitude_km`,
+    SQRT(
+        POWER((6371.0 + s.`altitude_km`) * COS(RADIANS(s.`latitude`)) * COS(RADIANS(s.`longitude`))
+            - (6371.0 + i.`altitude_km`) * COS(RADIANS(i.`latitude`)) * COS(RADIANS(i.`longitude`)), 2)
+      + POWER((6371.0 + s.`altitude_km`) * COS(RADIANS(s.`latitude`)) * SIN(RADIANS(s.`longitude`))
+            - (6371.0 + i.`altitude_km`) * COS(RADIANS(i.`latitude`)) * SIN(RADIANS(i.`longitude`)), 2)
+      + POWER((6371.0 + s.`altitude_km`) * SIN(RADIANS(s.`latitude`))
+            - (6371.0 + i.`altitude_km`) * SIN(RADIANS(i.`latitude`)), 2)
+    ) AS `distance_km`
+  FROM (SELECT * FROM TABLE(TUMBLE(TABLE `sat_positions`, DESCRIPTOR(`event_time`), INTERVAL '1' SECOND))) AS s
+  JOIN (SELECT * FROM TABLE(TUMBLE(TABLE `iss_position`, DESCRIPTOR(`event_time`), INTERVAL '1' SECOND))) AS i
+    ON s.`window_start` = i.`window_start` AND s.`window_end` = i.`window_end`
+)
+WHERE `distance_km` < ${radius_km};

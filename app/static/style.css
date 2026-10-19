@@ -154,6 +154,8 @@ ol, ul { list-style: none; }
   gap: 8px;
 }
 .grid .situation dd { font-family: var(--body); font-size: 15px; line-height: 1.4; }
+.grid .nearest { justify-content: space-between; }
+.grid .near-dist { color: var(--ink-2); }
 
 .compass {
   width: 22px; height: 22px;
@@ -241,13 +243,20 @@ ol, ul { list-style: none; }
 }
 .log .t-CITY_FLYOVER .glyph { border-color: var(--ice); color: var(--ice); }
 .log .t-ORBIT_COMPLETE .glyph,
-.log .t-ECLIPSE_PASS .glyph { border-color: var(--amber); color: var(--amber); }
+.log .t-ECLIPSE_PASS .glyph,
+.log .t-CONJUNCTION .glyph { border-color: var(--amber); color: var(--amber); }
 .log .title { font-weight: 500; }
 .log .time { color: var(--ink-3); font-size: 13px; }
 .log .detail { color: var(--ink-2); font-size: 13px; grid-column: 2 / -1; }
 .log li.fresh button { animation: fresh 2.4s ease-out; }
 @keyframes fresh { from { background: rgba(143, 211, 255, 0.16); } to { background: transparent; } }
 .log-empty { color: var(--ink-2); font-size: 14px; padding: 18px 22px; max-width: 34ch; }
+
+.forecast { margin-bottom: 18px; border-bottom: 1px solid var(--rule); }
+.forecast ol { flex: none; overflow: visible; }
+.forecast li:last-child button { border-bottom: 0; }
+.forecast .glyph { border-style: dashed; }
+.forecast .log-empty { padding: 12px 22px; }
 
 /* ---------- flyover banner ---------- */
 
@@ -268,6 +277,7 @@ ol, ul { list-style: none; }
   animation: banner 0.5s ease-out;
   white-space: nowrap;
 }
+.flyover-banner.conjunction { border-color: var(--amber); }
 @keyframes banner { from { opacity: 0; transform: translate(-50%, -12px); } }
 
 /* ---------- pipeline strip ---------- */
@@ -286,7 +296,7 @@ ol, ul { list-style: none; }
   display: flex;
   align-items: center;
   height: 100%;
-  min-width: 1080px;
+  min-width: 1260px;
   gap: 22px;
 }
 .flow > li { position: relative; flex: none; }
@@ -330,11 +340,13 @@ ol, ul { list-style: none; }
 .node.stmt .name { color: var(--ice); }
 .node.sink .name b { color: var(--amber); font-weight: 600; }
 
-.fan ul { display: grid; grid-template-columns: repeat(3, auto); gap: 5px; }
+.fan ul { display: grid; grid-template-rows: repeat(2, auto); grid-auto-flow: column; gap: 5px; }
 .node.small { padding: 3px 9px; min-width: 0; }
 .node.small .name { font-size: 15px; }
 .node.small .meta { font-size: 11px; }
-.sinks { display: flex; flex-direction: column; gap: 4px; }
+.sinks, .stack { display: flex; flex-direction: column; gap: 4px; }
+.stack .node { padding: 4px 11px; }
+.stack .node .kind { display: none; }
 .sinks .node { padding: 2px 12px; flex-direction: row; align-items: baseline; gap: 10px; }
 .sinks .node .name { font-size: 16px; min-width: 84px; }
 .sinks .node .kind { display: none; }

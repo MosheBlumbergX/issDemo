@@ -1,0 +1,36 @@
+-- Closest approach per satellite: LAG over each satellite's own distance series.
+-- When the previous distance is smaller than both its neighbours, that second was
+-- the closest the two came. Reported when under ${radius_km} km; the event is
+-- located at the satellite, slightly above or below the station.
+INSERT INTO `iss_events`
+SELECT
+  `prev_time` AS `event_time`,
+  'CONJUNCTION' AS `event_type`,
+  CONCAT('Close approach: ', `name`) AS `title`,
+  CONCAT(
+    'Passed ', CAST(CAST(ROUND(`d1`, 0) AS INT) AS STRING), ' km from the ISS, ',
+    CAST(CAST(ROUND(ABS(`dalt1`), 0) AS INT) AS STRING), ' km ',
+    CASE WHEN `dalt1` >= 0 THEN 'above' ELSE 'below' END
+  ) AS `detail`,
+  `lat1` AS `latitude`,
+  `lon1` AS `longitude`,
+  `d1` AS `distance_km`,
+  CAST(NULL AS DOUBLE) AS `duration_min`
+FROM (
+  SELECT
+    `event_time`,
+    `name`,
+    `distance_km` AS `d0`,
+    LAG(`distance_km`) OVER (PARTITION BY `norad_id` ORDER BY `event_time`) AS `d1`,
+    LAG(`distance_km`, 2) OVER (PARTITION BY `norad_id` ORDER BY `event_time`) AS `d2`,
+    LAG(`latitude`) OVER (PARTITION BY `norad_id` ORDER BY `event_time`) AS `lat1`,
+    LAG(`longitude`) OVER (PARTITION BY `norad_id` ORDER BY `event_time`) AS `lon1`,
+    LAG(`altitude_km` - `iss_altitude_km`) OVER (PARTITION BY `norad_id` ORDER BY `event_time`) AS `dalt1`,
+    LAG(`event_time`) OVER (PARTITION BY `norad_id` ORDER BY `event_time`) AS `prev_time`,
+    LAG(`event_time`, 2) OVER (PARTITION BY `norad_id` ORDER BY `event_time`) AS `prev2_time`
+  FROM `iss_proximity`
+)
+WHERE `d1` < ${radius_km}
+  AND `d1` < `d2`
+  AND `d1` <= `d0`
+  AND TIMESTAMPDIFF(SECOND, `prev2_time`, `event_time`) <= 4;

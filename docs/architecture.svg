@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 760" width="1400" height="760" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" width="1400" height="900" role="img" aria-labelledby="title desc">
   <title id="title">ISS demo data flow</title>
-  <desc id="desc">The ISS position API feeds a producer on AWS, which writes to Kafka on Confluent Cloud. Flink SQL statements enrich the stream and derive stats, distance and events into further topics. A dashboard server on AWS reads those topics and streams them through CloudFront to the browser.</desc>
+  <desc id="desc">The ISS position API feeds a producer on AWS, which writes to Kafka on Confluent Cloud. Flink SQL statements enrich the stream and derive stats, distance and events into further topics. A second producer turns CelesTrak orbital elements into satellite positions every second; Flink joins them with the ISS position to find nearby satellites and close approaches. A dashboard server on AWS reads the topics and streams them through CloudFront to the browser.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#7f97b2"/>
@@ -24,15 +24,15 @@
     </style>
   </defs>
 
-  <rect class="bg" width="1400" height="760" rx="14"/>
+  <rect class="bg" width="1400" height="900" rx="14"/>
 
   <!-- groups -->
-  <rect class="group aws" x="240" y="40" width="230" height="680" rx="10"/>
+  <rect class="group aws" x="240" y="40" width="230" height="820" rx="10"/>
   <text class="glabel" x="258" y="70">AWS</text>
   <text class="gsub" x="258" y="90">us-east-1</text>
-  <text class="gsub" x="258" y="711">EC2, S3, Secrets Manager</text>
+  <text class="gsub" x="258" y="851">EC2, S3, Secrets Manager</text>
 
-  <rect class="group" x="500" y="40" width="870" height="680" rx="10"/>
+  <rect class="group" x="500" y="40" width="870" height="820" rx="10"/>
   <text class="glabel" x="518" y="70">Confluent Cloud</text>
   <text class="gsub" x="518" y="90">Kafka, Flink SQL and Schema Registry, all provisioned by Terraform</text>
 
@@ -52,7 +52,7 @@
 
   <rect class="node" x="260" y="528" width="190" height="64" rx="6"/>
   <text class="t" x="355" y="556">Dashboard server</text>
-  <text class="s" x="355" y="576">reads 5 topics, streams SSE</text>
+  <text class="s" x="355" y="576">reads 6 topics, streams SSE</text>
 
   <rect class="node" x="260" y="628" width="190" height="64" rx="6"/>
   <text class="t" x="355" y="656">CloudFront</text>
@@ -91,7 +91,7 @@
 
   <rect class="stmt" x="858" y="330" width="150" height="64" rx="4"/>
   <text class="t stmt-name" x="933" y="358">City proximity</text>
-  <text class="s" x="933" y="378">UNNEST, 35 cities</text>
+  <text class="s" x="933" y="378">UNNEST, 158 cities</text>
 
   <rect class="stmt" x="1022" y="330" width="150" height="64" rx="4"/>
   <text class="t stmt-name" x="1097" y="358">Full orbit</text>
@@ -108,12 +108,37 @@
 
   <rect class="topic" x="694" y="436" width="642" height="56" rx="28"/>
   <text class="t topic-name" x="1015" y="460">iss_events</text>
-  <text class="s" x="1015" y="479">flyovers, equator crossings, sunrises, orbit periods, night passes</text>
+  <text class="s" x="1015" y="479">flyovers, close approaches, equator crossings, sunrises, orbit periods, night passes</text>
+
+  <!-- row 5: satellites -->
+  <rect class="node" x="30" y="750" width="180" height="64" rx="6"/>
+  <text class="t" x="120" y="778">CelesTrak</text>
+  <text class="s" x="120" y="798">orbital elements, every 2 h</text>
+
+  <rect class="node" x="260" y="750" width="190" height="64" rx="6"/>
+  <text class="t" x="355" y="778">Satellite producer</text>
+  <text class="s" x="355" y="798">SGP4, every second</text>
+
+  <rect class="topic" x="530" y="750" width="170" height="64" rx="32"/>
+  <text class="t topic-name" x="615" y="778">sat_positions</text>
+  <text class="s" x="615" y="798">~6,000 satellites a second</text>
+
+  <rect class="stmt" x="740" y="750" width="180" height="64" rx="4"/>
+  <text class="t stmt-name" x="830" y="778">Satellites nearby</text>
+  <text class="s" x="830" y="798">window join with iss_position</text>
+
+  <rect class="topic" x="960" y="750" width="170" height="64" rx="32"/>
+  <text class="t topic-name" x="1045" y="778">iss_proximity</text>
+  <text class="s" x="1045" y="798">within 500 km, 3D distance</text>
+
+  <rect class="stmt" x="1186" y="750" width="150" height="64" rx="4"/>
+  <text class="t stmt-name" x="1261" y="778">Close approach</text>
+  <text class="s" x="1261" y="798">LAG per satellite</text>
 
   <!-- schema registry + legend -->
-  <rect class="node" x="1130" y="620" width="206" height="64" rx="6"/>
-  <text class="t" x="1233" y="648">Schema Registry</text>
-  <text class="s" x="1233" y="668">Avro schemas from Flink DDL</text>
+  <rect class="node" x="930" y="620" width="206" height="64" rx="6"/>
+  <text class="t" x="1033" y="648">Schema Registry</text>
+  <text class="s" x="1033" y="668">Avro schemas from Flink DDL</text>
 
   <rect class="topic" x="530" y="640" width="40" height="20" rx="10"/>
   <text class="legend" x="580" y="655">Kafka topic</text>
@@ -145,7 +170,14 @@
   <path class="flow" d="M1015,492 V560"/>
   <path class="flow" d="M605,492 V560"/>
   <path class="flow" d="M1015,560 H452" marker-end="url(#arrow)"/>
-  <text class="bus-label" x="626" y="582">also reads iss_position, iss_telemetry and iss_distance</text>
+  <text class="bus-label" x="626" y="582">also reads iss_position, iss_telemetry, iss_distance and iss_proximity</text>
+
+  <path class="flow" d="M210,782 H258" marker-end="url(#arrow)"/>
+  <path class="flow" d="M450,782 H528" marker-end="url(#arrow)"/>
+  <path class="flow" d="M700,782 H738" marker-end="url(#arrow)"/>
+  <path class="flow" d="M920,782 H958" marker-end="url(#arrow)"/>
+  <path class="flow" d="M1130,782 H1184" marker-end="url(#arrow)"/>
+  <path class="flow" d="M1261,750 V494" marker-end="url(#arrow)"/>
 
   <path class="flow" d="M355,592 V626" marker-end="url(#arrow)"/>
   <path class="flow" d="M260,660 H212" marker-end="url(#arrow)"/>

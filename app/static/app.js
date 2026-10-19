@@ -21,6 +21,11 @@ const state = {
   follow: true,
   distance: null,
   lastTrailDraw: 0,
+  satellitesEnabled: false,
+  satellites: [],    // tracked catalog: { id, name, satrec }
+  catalogPoints: [], // their positions, propagated in the browser
+  neighbours: null,  // Flink's iss_proximity, one second's set: { t, sats }
+  forecast: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -97,16 +102,25 @@ const globe = new Globe(globeEl, { rendererConfig: { antialias: true, alpha: fal
   .pathTransitionDuration(0)
   // visibility footprint under the station + flyover pulses
   .ringLat("lat").ringLng("lng").ringAltitude(0.002)
-  .ringColor((d) => (t) => (d.kind === "flyover" ? `rgba(143,211,255,${1 - t})` : `rgba(255,181,71,${0.55 * (1 - t)})`))
+  .ringColor((d) => (t) =>
+    d.kind === "flyover" ? `rgba(143,211,255,${1 - t})`
+    : d.kind === "conjunction" ? `rgba(255,181,71,${1 - t})`
+    : `rgba(255,181,71,${0.55 * (1 - t)})`)
   .ringMaxRadius("radius")
-  .ringPropagationSpeed((d) => (d.kind === "flyover" ? 2 : 5))
-  .ringRepeatPeriod((d) => (reducedMotion ? 0 : d.kind === "flyover" ? 900 : 2200))
-  // event markers
+  .ringPropagationSpeed((d) => (d.kind === "footprint" ? 5 : 2))
+  .ringRepeatPeriod((d) => (reducedMotion ? 0 : d.kind === "footprint" ? 2200 : 900))
+  // event markers, and names of the nearest satellites
   .labelLat("lat").labelLng("lng").labelText("text")
-  .labelSize(0.55).labelDotRadius(0.35)
+  .labelSize((d) => d.size ?? 0.55).labelDotRadius((d) => d.dot ?? 0.35)
   .labelColor((d) => d.color)
   .labelResolution(2)
-  .labelAltitude(0.004);
+  .labelAltitude((d) => d.alt ?? 0.004)
+  // satellites: the whole tracked catalog (faint) and Flink's nearby set (bright)
+  .particlesList("pts")
+  .particleLat("lat").particleLng("lng").particleAltitude("alt")
+  .particlesSize("size")
+  .particlesSizeAttenuation(false)
+  .particlesColor("color");
 
 // Hide the marker while the station is on the far side of the planet. globe.gl only
 // re-checks occlusion when the camera moves, so test every frame ourselves.
@@ -209,14 +223,119 @@ function drawRings() {
 
 function drawLabels() {
   const recent = state.events.filter((e) => e.event_type === "CITY_FLYOVER").slice(-8);
-  globe.labelsData(
-    recent.map((e) => ({
+  const nearest = currentNeighbours().slice(0, 3);
+  globe.labelsData([
+    ...recent.map((e) => ({
       lat: e.latitude,
       lng: e.longitude,
       text: e.title.replace("Flyover: ", "").split(",")[0],
       color: "rgba(143,211,255,0.9)",
     })),
-  );
+    ...nearest.map((s) => ({
+      lat: s.latitude,
+      lng: s.longitude,
+      alt: s.altitude_km / EARTH_RADIUS_KM,
+      text: `${s.name} ${fmt(s.distance_km)} km`,
+      color: "rgba(232,238,246,0.85)",
+      size: 0.28,
+      dot: 0.15,
+    })),
+  ]);
+}
+
+// ---------------------------------------------------------------------------
+// Satellites: the catalog is propagated here for the picture; which ones are
+// near the ISS, and how near, comes from Flink (iss_proximity).
+// ---------------------------------------------------------------------------
+async function loadSatellites() {
+  try {
+    const resp = await fetch("/api/satellites");
+    if (!resp.ok) return;
+    const list = await resp.json();
+    state.satellites = list.map((s) => ({ id: s.id, name: s.name, satrec: satellite.twoline2satrec(s.line1, s.line2) }));
+    $("sat-rate").textContent = fmt(list.length); // the producer sends each one every second
+    propagateCatalog();
+  } catch { /* the layer is optional */ }
+}
+
+function propagateCatalog() {
+  if (!state.satellites.length) return;
+  // Same instant as the ISS marker, which trails real time by the pipeline lag.
+  const date = new Date(state.position?.t ?? Date.now());
+  const gmst = satellite.gstime(date);
+  const points = [];
+  for (const s of state.satellites) {
+    const pv = satellite.propagate(s.satrec, date);
+    if (!pv || !pv.position) continue;
+    const geo = satellite.eciToGeodetic(pv.position, gmst);
+    points.push({ lat: satellite.degreesLat(geo.latitude), lng: satellite.degreesLong(geo.longitude), alt: geo.height / EARTH_RADIUS_KM });
+  }
+  state.catalogPoints = points;
+  drawSatellites();
+}
+
+// Flink's latest set, nearest first; empty once it is more than a few seconds behind the ISS.
+function currentNeighbours() {
+  const n = state.neighbours;
+  if (!n || (state.position && state.position.t - n.t > 10000)) return [];
+  return n.sats.slice().sort((a, b) => a.distance_km - b.distance_km);
+}
+
+function drawSatellites() {
+  const near = currentNeighbours().map((s) => ({ lat: s.latitude, lng: s.longitude, alt: s.altitude_km / EARTH_RADIUS_KM }));
+  globe.particlesData([
+    { pts: state.catalogPoints, color: "#5d7898", size: 1.5 },
+    { pts: near, color: ICE, size: 4 },
+  ]);
+}
+
+function renderNeighbours() {
+  drawSatellites();
+  drawLabels();
+  if (!state.neighbours) return;
+  const sats = currentNeighbours();
+  $("near-count").textContent = fmt(sats.length);
+  $("near-name").textContent = sats.length ? sats[0].name : "None in range";
+  $("near-dist").textContent = sats.length ? fmt(sats[0].distance_km) : "-";
+}
+
+function countdown(ms) {
+  const min = Math.round(ms / 60000);
+  if (min < 1) return "now";
+  if (min < 60) return `in ${min} min`;
+  return `in ${Math.floor(min / 60)} h ${min % 60} min`;
+}
+
+function renderForecast() {
+  const f = state.forecast;
+  if (!f) return;
+  $("forecast-sub").textContent = `Predicted from orbital elements: the next ${f.hours} hours, under ${fmt(f.radius_km)} km`;
+  const now = Date.now();
+  const upcoming = f.approaches.filter((a) => a.t > now - 30000).slice(0, 3);
+  $("forecast").replaceChildren(...upcoming.map((a) => {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.title = "Show on the globe";
+    btn.innerHTML = `
+      <span class="glyph" aria-hidden="true">◇</span>
+      <span class="title"></span>
+      <span class="time">${countdown(a.t - now)}</span>
+      <span class="detail"></span>`;
+    const above = a.altitude_km >= a.iss_altitude_km ? "above" : "below";
+    btn.querySelector(".title").textContent = a.name;
+    btn.querySelector(".detail").textContent =
+      `${fmt(a.distance_km)} km from the ISS, ${fmt(Math.abs(a.altitude_km - a.iss_altitude_km))} km ${above}, at ${clock(a.t)}`;
+    btn.addEventListener("click", () => {
+      setFollow(false);
+      globe.pointOfView({ lat: a.latitude, lng: a.longitude, altitude: 1.6 }, 1200);
+    });
+    li.append(btn);
+    return li;
+  }));
+  const empty = $("forecast-empty");
+  empty.hidden = upcoming.length > 0;
+  empty.textContent = `None predicted under ${fmt(f.radius_km)} km in the next ${f.hours} hours`;
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +478,7 @@ const glyphs = {
   CITY_FLYOVER: "◎",
   ORBIT_COMPLETE: "↻",
   ECLIPSE_PASS: "●",
+  CONJUNCTION: "◆",
 };
 
 function eventItem(e, fresh) {
@@ -414,14 +534,42 @@ function addEvent(e) {
   if (e.event_type === "CITY_FLYOVER") {
     flyoverRings.push({ kind: "flyover", lat: e.latitude, lng: e.longitude, radius: 6, at: Date.now() });
     drawLabels();
-    showBanner(`${e.title.replace("Flyover: ", "Passing ")}, ${fmt(e.distance_km)} km away`);
+    queueBanner(e);
+  } else if (e.event_type === "CONJUNCTION") {
+    flyoverRings.push({ kind: "conjunction", lat: e.latitude, lng: e.longitude, radius: 4, at: Date.now() });
+    queueBanner(e);
   }
 }
 
+// Flink commits about once a minute, so events arrive in bursts: one banner per burst.
+let bannerQueue = [];
+let bannerFlush;
+function queueBanner(e) {
+  bannerQueue.push(e);
+  clearTimeout(bannerFlush);
+  bannerFlush = setTimeout(() => {
+    const conjunction = bannerQueue.findLast((x) => x.event_type === "CONJUNCTION");
+    const cities = bannerQueue.filter((x) => x.event_type === "CITY_FLYOVER").map((x) => x.title.replace("Flyover: ", "").split(",")[0]);
+    const last = bannerQueue[bannerQueue.length - 1];
+    bannerQueue = [];
+    if (conjunction) {
+      showBanner(`${conjunction.title.replace("Close approach: ", "")} passed ${fmt(conjunction.distance_km)} km from the ISS`, "conjunction");
+    } else if (cities.length === 1) {
+      showBanner(`${last.title.replace("Flyover: ", "Passing ")}, ${fmt(last.distance_km)} km away`);
+    } else if (cities.length > 1) {
+      const recent = cities.slice(-3).reverse();
+      const more = cities.length - recent.length;
+      showBanner(more ? `Passing ${recent.join(", ")} and ${more} more` : `Passing ${recent.slice(0, -1).join(", ")} and ${recent.at(-1)}`);
+    }
+  }, 400);
+}
+
 let bannerTimer;
-function showBanner(text) {
+function showBanner(text, kind = "flyover") {
   const el = $("banner");
+  if (kind !== "conjunction" && !el.hidden && el.classList.contains("conjunction")) return; // rarer; let it stay
   el.textContent = text;
+  el.classList.toggle("conjunction", kind === "conjunction");
   el.hidden = false;
   clearTimeout(bannerTimer);
   bannerTimer = setTimeout(() => (el.hidden = true), 12000);
@@ -476,6 +624,17 @@ function applySnapshot(s) {
   state.position = s.position || state.position;
   state.telemetry = s.telemetry || state.telemetry;
   state.distance = s.distance || state.distance;
+  state.neighbours = s.neighbours || state.neighbours;
+  state.forecast = s.forecast || state.forecast;
+  if (s.city_count) $("city-count").textContent = fmt(s.city_count);
+  if (s.satellites_enabled && !state.satellitesEnabled) {
+    state.satellitesEnabled = true;
+    document.querySelectorAll(".sat-only").forEach((el) => (el.hidden = false));
+    $("prox-radius").textContent = fmt(s.proximity_radius_km);
+    $("forecast-sub").textContent = `Predicted from orbital elements, under ${fmt(s.conjunction_radius_km)} km`;
+    loadSatellites();
+    setInterval(loadSatellites, 30 * 60 * 1000);
+  }
   if (s.repo_url) {
     $("repo-link").href = s.repo_url;
     $("sql-link").href = `${s.repo_url}/tree/main/terraform/sql`;
@@ -492,6 +651,10 @@ function applySnapshot(s) {
   renderEvents();
   renderSparks();
   drawPaths();
+  if (state.satellitesEnabled) {
+    renderNeighbours();
+    renderForecast();
+  }
   if (state.position && state.follow && !view) {
     globe.pointOfView({ lat: state.position.latitude * 0.6, lng: state.position.longitude, altitude: 2.2 }, 1500);
   }
@@ -539,6 +702,15 @@ function connect() {
     pulse("iss_distance");
     renderDistance();
   });
+  on("iss_proximity", (n) => {
+    state.neighbours = n;
+    pulse("iss_proximity");
+    renderNeighbours();
+  });
+  on("forecast", (f) => {
+    state.forecast = f;
+    renderForecast();
+  });
   on("metrics", renderMetrics);
 }
 
@@ -553,3 +725,5 @@ if (view) {
 connect();
 loadTle();
 setInterval(loadTle, 30 * 60 * 1000);
+setInterval(propagateCatalog, 2000);
+setInterval(renderForecast, 30 * 1000);

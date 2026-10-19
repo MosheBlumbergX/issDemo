@@ -1,5 +1,5 @@
 #!/bin/bash
-# Boot script: install the app from S3, pull credentials, run producer + dashboard.
+# Boot script: install the app from S3, pull credentials, run the producers + dashboard.
 set -euxo pipefail
 
 dnf install -y python3.11 python3.11-pip unzip jq
@@ -36,6 +36,24 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 
+cat > /etc/systemd/system/iss-sat-producer.service <<'UNIT'
+[Unit]
+Description=Satellite position producer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=iss
+WorkingDirectory=/opt/iss
+Environment=SAT_BAND_MARGIN_KM=${band_margin_km}
+ExecStart=/opt/iss/.venv/bin/python -u sat_producer.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 cat > /etc/systemd/system/iss-dashboard.service <<'UNIT'
 [Unit]
 Description=ISS dashboard
@@ -46,6 +64,11 @@ Wants=network-online.target
 User=iss
 WorkingDirectory=/opt/iss
 Environment=REPO_URL=${repo_url}
+Environment=SATELLITES_ENABLED=${satellites_enabled}
+Environment=SAT_BAND_MARGIN_KM=${band_margin_km}
+Environment=PROXIMITY_RADIUS_KM=${proximity_radius_km}
+Environment=CONJUNCTION_RADIUS_KM=${conjunction_radius_km}
+Environment=CITY_COUNT=${city_count}
 ExecStart=/opt/iss/.venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*
 Restart=always
 RestartSec=5
@@ -56,3 +79,6 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable --now iss-producer iss-dashboard
+%{ if satellites_enabled ~}
+systemctl enable --now iss-sat-producer
+%{ endif ~}
