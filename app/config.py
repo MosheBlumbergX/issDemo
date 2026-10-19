@@ -27,6 +27,11 @@ TOPIC_TELEMETRY = "iss_telemetry"
 TOPIC_STATS = "iss_stats"
 TOPIC_EVENTS = "iss_events"
 TOPIC_DISTANCE = "iss_distance"
+TOPIC_SATELLITES = "sat_positions"
+TOPIC_PROXIMITY = "iss_proximity"
+
+# The satellite layer (Terraform variable satellites_enabled); the rest of the demo runs without it.
+SATELLITES_ENABLED = os.environ.get("SATELLITES_ENABLED", "true").lower() == "true"
 
 
 def kafka_conf() -> dict:

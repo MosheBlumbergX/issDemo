@@ -47,6 +47,8 @@
       <div class="wide"><dt>Ground-track speed, computed by Flink</dt><dd><span id="ground">-</span> km/h</dd></div>
       <div><dt>Distance, last hour</dt><dd><span id="dist-1h">-</span> km</dd></div>
       <div><dt id="dist-total-label">Distance tracked</dt><dd><span id="dist-total">-</span> km</dd></div>
+      <div class="wide sat-only" hidden><dt>Nearest satellite, from a Flink window join</dt><dd class="nearest"><span id="near-name">-</span><span class="near-dist"><span id="near-dist">-</span> km</span></dd></div>
+      <div class="wide sat-only" hidden><dt>Satellites within <span id="prox-radius">500</span> km of the ISS</dt><dd id="near-count">-</dd></div>
       <div class="wide situation"><dt>Status</dt><dd id="situation">Waiting for the first fix</dd></div>
     </dl>
 
@@ -61,25 +63,45 @@
   </aside>
 
   <aside class="panel log" aria-label="Flight log">
+    <section class="forecast sat-only" aria-label="Upcoming close approaches" hidden>
+      <h2>Next close approaches</h2>
+      <p class="log-sub" id="forecast-sub">Predicted from orbital elements, under 40 km</p>
+      <ol id="forecast"></ol>
+      <p class="log-empty" id="forecast-empty">Computing the next six hours of orbits</p>
+    </section>
     <h2>Flight log</h2>
     <p class="log-sub">Events detected by Flink as they happen</p>
     <ol id="events" aria-live="polite"></ol>
-    <p class="log-empty" id="events-empty">Flink is watching for equator crossings, orbital sunrises and sunsets, and passes over major cities. The first event usually appears within 20 minutes.</p>
+    <p class="log-empty" id="events-empty">Flink is watching for equator crossings, orbital sunrises and sunsets, passes over cities and close approaches with other satellites. The first event usually appears within 20 minutes.</p>
   </aside>
 
   <div class="flyover-banner" id="banner" role="status" hidden></div>
 
   <section class="panel pipeline" aria-label="Streaming pipeline">
     <ol class="flow">
-      <li class="node source">
-        <span class="kind">Source</span>
-        <span class="name">wheretheiss.at</span>
-        <span class="meta">polled every second</span>
+      <li class="stack">
+        <div class="node source">
+          <span class="kind">Source</span>
+          <span class="name">wheretheiss.at</span>
+          <span class="meta">polled every second</span>
+        </div>
+        <div class="node source sat-only" hidden>
+          <span class="kind">Source</span>
+          <span class="name">CelesTrak</span>
+          <span class="meta">SGP4, every second</span>
+        </div>
       </li>
-      <li class="node topic" data-topic="iss_position">
-        <span class="kind">Kafka topic</span>
-        <span class="name">iss_position</span>
-        <span class="meta"><b class="rate">0.0</b> msg/s</span>
+      <li class="stack">
+        <div class="node topic" data-topic="iss_position">
+          <span class="kind">Kafka topic</span>
+          <span class="name">iss_position</span>
+          <span class="meta"><b class="rate">0.0</b> msg/s</span>
+        </div>
+        <div class="node topic sat-only" data-topic="sat_positions" hidden>
+          <span class="kind">Kafka topic</span>
+          <span class="name">sat_positions</span>
+          <span class="meta"><b id="sat-rate">-</b> msg/s</span>
+        </div>
       </li>
       <li class="node stmt">
         <span class="kind">Flink SQL</span>
@@ -95,10 +117,12 @@
         <ul>
           <li class="node stmt small"><span class="name">Sliding window</span><span class="meta">HOP 1 min / 10 s</span></li>
           <li class="node stmt small"><span class="name">State changes</span><span class="meta">equator, day and night</span></li>
-          <li class="node stmt small"><span class="name">City proximity</span><span class="meta">UNNEST over 35 cities</span></li>
+          <li class="node stmt small"><span class="name">City proximity</span><span class="meta">UNNEST over <span id="city-count">158</span> cities</span></li>
           <li class="node stmt small"><span class="name">Full orbit</span><span class="meta">MATCH_RECOGNIZE</span></li>
           <li class="node stmt small"><span class="name">Night pass</span><span class="meta">MATCH_RECOGNIZE</span></li>
           <li class="node stmt small"><span class="name">Odometer</span><span class="meta">1 h RANGE window</span></li>
+          <li class="node stmt small sat-only" hidden><span class="name">Satellites nearby</span><span class="meta">window join, 1 s</span></li>
+          <li class="node stmt small sat-only" hidden><span class="name">Close approach</span><span class="meta">LAG per satellite</span></li>
         </ul>
       </li>
       <li class="sinks">
@@ -110,6 +134,11 @@
         <div class="node topic" data-topic="iss_distance">
           <span class="kind">Kafka topic</span>
           <span class="name">iss_distance</span>
+          <span class="meta"><b class="rate">0.0</b> msg/s</span>
+        </div>
+        <div class="node topic sat-only" data-topic="iss_proximity" hidden>
+          <span class="kind">Kafka topic</span>
+          <span class="name">iss_proximity</span>
           <span class="meta"><b class="rate">0.0</b> msg/s</span>
         </div>
         <div class="node topic" data-topic="iss_events">

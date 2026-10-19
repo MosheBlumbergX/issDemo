@@ -48,7 +48,7 @@ data "archive_file" "app" {
   type        = "zip"
   source_dir  = "${path.module}/../app"
   output_path = "${path.module}/.build/app.zip"
-  excludes    = [".venv", ".venv/**", ".env.app", "__pycache__", "__pycache__/**"]
+  excludes    = [".venv", ".venv/**", ".env.app", "__pycache__", "__pycache__/**", ".cache", ".cache/**"]
 }
 
 resource "aws_s3_bucket" "app" {
@@ -188,6 +188,12 @@ resource "aws_instance" "app" {
     key        = aws_s3_object.app.key
     secret_arn = aws_secretsmanager_secret.kafka.arn
     repo_url   = var.repo_url
+
+    satellites_enabled    = var.satellites_enabled
+    band_margin_km        = var.conjunction_radius_km + 5
+    proximity_radius_km   = var.proximity_radius_km
+    conjunction_radius_km = var.conjunction_radius_km
+    city_count            = length(var.cities)
   })
   user_data_replace_on_change = true
 
@@ -247,6 +253,18 @@ resource "aws_cloudfront_distribution" "app" {
     cache_policy_id          = local.cf_caching_disabled
     origin_request_policy_id = local.cf_all_viewer_except_host
     compress                 = false # compression would buffer the event stream
+  }
+
+  # About 1 MB of orbital elements, the same for every visitor; the server sets a
+  # 15-minute max-age.
+  ordered_cache_behavior {
+    path_pattern           = "/api/satellites"
+    target_origin_id       = local.origin_id
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = local.cf_caching_optimized
+    compress               = true
   }
 
   ordered_cache_behavior {

@@ -1,15 +1,19 @@
 """Dashboard backend: consumes the Flink output topics and streams them to the browser (SSE).
 
 On start it rewinds each topic (one orbit of telemetry, a day of events) so the UI
-has a trail and a flight log immediately, then follows live.
+has a trail and a flight log immediately, then follows live. It also serves the
+tracked satellites' orbital elements for the globe, and a forecast of the ISS's
+next close approaches.
 """
 import asyncio
 import json
+import multiprocessing
 import os
 import threading
 import time
 import uuid
 from collections import deque
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,8 +26,10 @@ from confluent_kafka.serialization import MessageField, SerializationContext
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from sgp4.exporter import export_tle
 
 import config
+import orbits
 
 LOOKBACK_SECONDS = {
     config.TOPIC_POSITION: 5 * 60,
@@ -32,11 +38,18 @@ LOOKBACK_SECONDS = {
     config.TOPIC_EVENTS: 24 * 3600,
     config.TOPIC_DISTANCE: 5 * 60,
 }
+if config.SATELLITES_ENABLED:
+    LOOKBACK_SECONDS[config.TOPIC_PROXIMITY] = 10
 TLE_URL = "https://api.wheretheiss.at/v1/satellites/25544/tles"
 TLE_TTL_SECONDS = 3600
+SATELLITES_TTL_SECONDS = 15 * 60
+FORECAST_HOURS = 6
+FORECAST_EVERY_SECONDS = 15 * 60
+CONJUNCTION_RADIUS_KM = float(os.environ.get("CONJUNCTION_RADIUS_KM", 40))
 
 # Fields of iss_telemetry the trail/sparklines need (keeps snapshots small).
 TRAIL_FIELDS = ("t", "latitude", "longitude", "altitude_km", "velocity_kmh", "sunlit")
+NEIGHBOUR_FIELDS = ("norad_id", "name", "latitude", "longitude", "altitude_km", "distance_km")
 
 
 def _jsonable(value):
@@ -60,6 +73,10 @@ class Hub:
         self.latest_position: dict | None = None
         self.latest_telemetry: dict | None = None
         self.latest_distance: dict | None = None
+        # iss_proximity: one row per nearby satellite per second, grouped by second.
+        self.neighbours: dict | None = None
+        self.pending_neighbours: dict | None = None
+        self.forecast: dict | None = None
         self.counts = {t: 0 for t in LOOKBACK_SECONDS}
         self.arrivals = {t: deque(maxlen=2000) for t in LOOKBACK_SECONDS}
         self.caught_up = False
@@ -73,11 +90,18 @@ class Hub:
                 "position": self.latest_position,
                 "telemetry": self.latest_telemetry,
                 "distance": self.latest_distance,
+                "neighbours": self.neighbours,
+                "forecast": self.forecast,
                 "console_url": os.environ.get("CONSOLE_URL"),
                 "repo_url": os.environ.get("REPO_URL"),
+                "satellites_enabled": config.SATELLITES_ENABLED,
+                "proximity_radius_km": float(os.environ.get("PROXIMITY_RADIUS_KM", 500)),
+                "conjunction_radius_km": CONJUNCTION_RADIUS_KM,
+                "city_count": int(os.environ.get("CITY_COUNT", 0)) or None,
             }
 
     def record(self, topic: str, row: dict, live: bool) -> None:
+        out = row
         with self.lock:
             self.counts[topic] += 1
             if live:
@@ -93,8 +117,21 @@ class Hub:
                 self.events.append(row)
             elif topic == config.TOPIC_DISTANCE:
                 self.latest_distance = row
-        if live:
-            self.publish(topic, row)
+            elif topic == config.TOPIC_PROXIMITY:
+                out = self._group_neighbours(row)
+        if live and out is not None:
+            self.publish(topic, out)
+
+    def _group_neighbours(self, row: dict) -> dict | None:
+        """Collects one second's rows; returns that second's set once the next one starts."""
+        sat = {k: row.get(k) for k in NEIGHBOUR_FIELDS}
+        if self.pending_neighbours and self.pending_neighbours["t"] == row["t"]:
+            self.pending_neighbours["sats"].append(sat)
+            return None
+        done, self.pending_neighbours = self.pending_neighbours, {"t": row["t"], "sats": [sat]}
+        if done:
+            self.neighbours = done
+        return done
 
     def metrics(self) -> dict:
         now = time.time()
@@ -188,20 +225,46 @@ async def metrics_loop() -> None:
         hub.publish("metrics", hub.metrics())
 
 
+async def forecast_loop() -> None:
+    """Predicts the next close approaches. Flink sees only the present, so this runs here."""
+    loop = asyncio.get_running_loop()
+    # A separate process keeps the CPU-heavy propagation off the event loop; spawn, not
+    # fork, because the Kafka consumer thread must not be copied into the child.
+    with ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn")) as pool:
+        while True:
+            try:
+                approaches = await loop.run_in_executor(pool, orbits.forecast, FORECAST_HOURS, CONJUNCTION_RADIUS_KM)
+                hub.forecast = {
+                    "computed_at": int(time.time() * 1000),
+                    "hours": FORECAST_HOURS,
+                    "radius_km": CONJUNCTION_RADIUS_KM,
+                    "approaches": approaches,
+                }
+                hub.publish("forecast", hub.forecast)
+            except Exception as exc:
+                print(f"forecast failed: {exc}")
+            await asyncio.sleep(FORECAST_EVERY_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     hub.loop = asyncio.get_running_loop()
     thread = threading.Thread(target=consume_loop, daemon=True)
     thread.start()
-    task = asyncio.create_task(metrics_loop())
+    tasks = [asyncio.create_task(metrics_loop())]
+    if config.SATELLITES_ENABLED:
+        tasks.append(asyncio.create_task(forecast_loop()))
     yield
-    task.cancel()
+    for task in tasks:
+        task.cancel()
     stop_event.set()
     thread.join(timeout=5)
 
 
 app = FastAPI(lifespan=lifespan)
 _tle_cache: dict = {"at": 0.0, "data": None}
+_satellites_cache: dict = {"at": 0.0, "data": None}
+_satellites_lock = asyncio.Lock()
 
 
 @app.get("/api/stream")
@@ -232,6 +295,28 @@ async def tle():
             data = resp.json()
         _tle_cache.update(at=time.time(), data={"line1": data["line1"], "line2": data["line2"]})
     return JSONResponse(_tle_cache["data"])
+
+
+def _satellite_tles() -> list[dict]:
+    fleet, _iss = orbits.tracked_fleet()
+    out = []
+    for o, norad_id, name in zip(fleet.sats, fleet.ids, fleet.names):
+        line1, line2 = export_tle(orbits.satrec(o))
+        out.append({"id": norad_id, "name": name, "line1": line1, "line2": line2})
+    return out
+
+
+@app.get("/api/satellites")
+async def satellites():
+    """Elements of every satellite the producer streams; the browser draws them all."""
+    if not config.SATELLITES_ENABLED:
+        return JSONResponse([])
+    async with _satellites_lock:
+        if time.time() - _satellites_cache["at"] > SATELLITES_TTL_SECONDS or not _satellites_cache["data"]:
+            data = await asyncio.to_thread(_satellite_tles)
+            _satellites_cache.update(at=time.time(), data=data)
+    # CloudFront caches and compresses this one (about 1 MB of TLEs, the same for everyone).
+    return JSONResponse(_satellites_cache["data"], headers={"Cache-Control": "public, max-age=900"})
 
 
 @app.get("/api/health")
